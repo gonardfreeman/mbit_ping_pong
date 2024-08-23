@@ -3,13 +3,13 @@
 
 use cortex_m::asm::nop;
 use cortex_m_rt::entry;
-use embedded_hal::digital::{/*InputPin,*/ OutputPin /*, PinState*/};
+use embedded_hal::digital::{InputPin, OutputPin};
 use hal::pac;
 use nrf52833_hal::{
     self as hal,
     gpio::{
-        p0::{P0_15, P0_19, P0_21, P0_22, P0_24, P0_28},
-        Level, Output, PushPull,
+        p0::{P0_14, P0_15, P0_19, P0_21, P0_22, P0_24, P0_28},
+        Input, Level, Output, PullUp, PushPull,
     },
     pac::Peripherals,
 };
@@ -37,20 +37,29 @@ fn main() -> ! {
         GpioPin::Pin5(port0.p0_19.into_push_pull_output(Level::Low)),
     ];
     let _col1: P0_28<Output<PushPull>> = port0.p0_28.into_push_pull_output(Level::Low);
-
-    let _ = port0.p0_14.into_pullup_input();
+    let mut btn_a: P0_14<Input<PullUp>> = port0.p0_14.into_pullup_input();
 
     rprintln!("Hello world");
     let mut index: usize = 0;
+    let mut direction = false;
     loop {
         move_left_col_led(index, &mut pins);
-        index = (index + 1) % pins.len();
-        // let btn_state = btn_a.is_low().unwrap();
-        // rprintln!("btn_a is: {}", btn_state);
-        // let _ = row1.set_state(PinState::from(btn_state));
-        for _ in 0..300_000 {
+        let btn_pressed = btn_a.is_low().unwrap();
+        if btn_pressed {
+            direction = !direction;
+        }
+        index = update_index(index, pins.len(), direction);
+        for _ in 0..75_000 {
             nop();
         }
+    }
+}
+
+fn update_index(index: usize, pins_len: usize, is_forward: bool) -> usize {
+    if is_forward {
+        (index + pins_len - 1) % pins_len
+    } else {
+        (index + 1) % pins_len
     }
 }
 
