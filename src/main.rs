@@ -1,108 +1,72 @@
 #![no_std]
 #![no_main]
 
-use crate::pac::interrupt;
-use cortex_m::asm::nop;
-use cortex_m_rt::entry;
-use embedded_hal::digital::OutputPin;
-use hal::pac;
-use nrf52833_hal::{
-    self as hal,
-    gpio::{
-        p0::{P0_15, P0_19, P0_21, P0_22, P0_24, P0_28},
-        Input, Level, Output, Pin, PullUp, PushPull,
-    },
-    gpiote::Gpiote,
-    pac::Peripherals,
-};
-use panic_halt as _;
-use rtt_target::{rprintln, rtt_init_print};
+use {core::panic::PanicInfo, nrf52833_hal as hal, rtt_target::rprintln};
 
-enum GpioPin {
-    Pin1(P0_21<Output<PushPull>>),
-    Pin2(P0_22<Output<PushPull>>),
-    Pin3(P0_15<Output<PushPull>>),
-    Pin4(P0_24<Output<PushPull>>),
-    Pin5(P0_19<Output<PushPull>>),
-}
+#[rtic::app(device = crate::hal::pac, peripherals = true, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
+mod app {
+    use cortex_m::asm::nop;
+    use embedded_hal::digital::OutputPin;
+    use nrf52833_hal::{
+        self as hal,
+        gpio::{
+            p0::{Parts, P0_21},
+            Level, Output, PushPull,
+        },
+    };
+    use rtic::Monotonic;
+    use rtt_target::{rprintln, rtt_init_print};
+    use systick_monotonic::*;
 
-static mut DIRECTION: bool = false;
+    #[monotonic(binds = SysTick, default = true)]
+    type Timer = Systick<1_000_000>;
 
-#[entry]
-fn main() -> ! {
-    rtt_init_print!();
-    let p: Peripherals = pac::Peripherals::take().unwrap();
-    let port0 = hal::gpio::p0::Parts::new(p.P0);
-    let mut pins: [GpioPin; 5] = [
-        GpioPin::Pin1(port0.p0_21.into_push_pull_output(Level::Low)),
-        GpioPin::Pin2(port0.p0_22.into_push_pull_output(Level::Low)),
-        GpioPin::Pin3(port0.p0_15.into_push_pull_output(Level::Low)),
-        GpioPin::Pin4(port0.p0_24.into_push_pull_output(Level::Low)),
-        GpioPin::Pin5(port0.p0_19.into_push_pull_output(Level::Low)),
-    ];
-    let _col1: P0_28<Output<PushPull>> = port0.p0_28.into_push_pull_output(Level::Low);
-    let btn_a: Pin<Input<PullUp>> = port0.p0_14.into_pullup_input().degrade();
-    let gpiote = Gpiote::new(p.GPIOTE);
-    gpiote
-        .channel0()
-        .input_pin(&btn_a)
-        .hi_to_lo()
-        .enable_interrupt();
-    unsafe {
-        pac::NVIC::unmask(pac::Interrupt::GPIOTE);
+    #[shared]
+    struct Shared {}
+
+    #[local]
+    struct Local {
+        row1: P0_21<Output<PushPull>>,
     }
-    rprintln!("Hello world");
-    let mut index: usize = 0;
-    loop {
-        move_left_col_led(index, &mut pins);
-        index = update_index(index, pins.len());
-        for _ in 0..300_000 {
+
+    #[init]
+    fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
+        rtt_init_print!();
+        let p0: Parts = hal::gpio::p0::Parts::new(ctx.device.P0);
+        let _col1 = p0.p0_28.into_push_pull_output(Level::Low);
+        let mut row1: P0_21<Output<PushPull>> = p0.p0_21.into_push_pull_output(Level::Low);
+        let _ = row1.set_high();
+        let mono = Systick::new(ctx.core.SYST, 64_000_000);
+        test_task::spawn().unwrap();
+        rprintln!("hello world");
+        if test_task::spawn().is_err() {
+            rprintln!("error spawning");
+        } else {
+            rprintln!("spawned");
+        }
+        (Shared {}, Local { row1 }, init::Monotonics(mono))
+    }
+
+    #[task(priority = 1)]
+    fn test_task(_ctx: test_task::Context) {
+        rprintln!("my test task");
+    }
+
+    #[idle(local = [row1])]
+    fn idle(ctx: idle::Context) -> ! {
+        let row1_pin = ctx.local.row1;
+        let _ = row1_pin.set_low();
+        rprintln!("idle...");
+        loop {
             nop();
         }
     }
 }
 
-#[interrupt]
-fn GPIOTE() {
-    let p: Peripherals = unsafe { pac::Peripherals::steal() };
-    let gpiote = Gpiote::new(p.GPIOTE);
-    if gpiote.channel0().is_event_triggered() {
-        // rprintln!("btn pressed dir: {}", unsafe { DIRECTION });
-        unsafe {
-            DIRECTION = !DIRECTION;
-        }
-        // rprintln!("btn pressed dir: {}", unsafe { DIRECTION });
-        gpiote.channel0().reset_events();
-    }
-}
-
-fn update_index(index: usize, pins_len: usize) -> usize {
-    // rprintln!("Direction is: {}", unsafe { DIRECTION });
-    if unsafe { DIRECTION } {
-        (index + pins_len - 1) % pins_len
-    } else {
-        (index + 1) % pins_len
-    }
-}
-
-fn move_left_col_led(index: usize, pins: &mut [GpioPin; 5]) {
-    for (i, pin) in pins.iter_mut().enumerate() {
-        if i == index {
-            match pin {
-                GpioPin::Pin1(p) => p.set_high().unwrap(),
-                GpioPin::Pin2(p) => p.set_high().unwrap(),
-                GpioPin::Pin3(p) => p.set_high().unwrap(),
-                GpioPin::Pin4(p) => p.set_high().unwrap(),
-                GpioPin::Pin5(p) => p.set_high().unwrap(),
-            }
-        } else {
-            match pin {
-                GpioPin::Pin1(p) => p.set_low().unwrap(),
-                GpioPin::Pin2(p) => p.set_low().unwrap(),
-                GpioPin::Pin3(p) => p.set_low().unwrap(),
-                GpioPin::Pin4(p) => p.set_low().unwrap(),
-                GpioPin::Pin5(p) => p.set_low().unwrap(),
-            }
-        }
-    }
+#[inline(never)]
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    cortex_m::interrupt::disable();
+    rprintln!("{}", info);
+    loop {}
 }
