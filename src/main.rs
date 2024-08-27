@@ -18,7 +18,7 @@ mod app {
     use rtt_target::{rprintln, rtt_init_print};
     use systick_monotonic::*;
 
-    #[monotonic(binds = SysTick, default = true)]
+    #[monotonic(binds = TIMER0, default = true)]
     type Timer = Systick<1_000_000>;
 
     #[shared]
@@ -56,9 +56,11 @@ mod app {
     fn idle(ctx: idle::Context) -> ! {
         let row1_pin = ctx.local.row1;
         let _ = row1_pin.set_low();
-        rprintln!("idle...");
         loop {
-            nop();
+            rprintln!("idle...");
+            for _ in 0..300_000 {
+                nop();
+            }
         }
     }
 }
