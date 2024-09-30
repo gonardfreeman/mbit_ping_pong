@@ -7,6 +7,7 @@ use {core::panic::PanicInfo, nrf52833_hal as hal, rtt_target::rprintln};
 mod app {
     use cortex_m::asm::nop;
     use embedded_hal::digital::{InputPin, OutputPin};
+    use fugit::Instant;
     use nrf52833_hal::{
         self as hal,
         gpio::{
@@ -49,13 +50,6 @@ mod app {
             .input_pin(&btn1)
             .hi_to_lo()
             .enable_interrupt();
-
-        test_task::spawn().unwrap();
-        if test_task::spawn().is_err() {
-            rprintln!("error spawning");
-        } else {
-            rprintln!("spawned");
-        }
         rprintln!("init finished");
         (
             Shared { gpiote },
@@ -64,23 +58,16 @@ mod app {
         )
     }
 
-    #[task(priority = 1)]
-    fn test_task(_ctx: test_task::Context) {
-        rprintln!("my test task");
-    }
-
     #[task(binds = GPIOTE, shared = [gpiote])]
     fn on_gpiote(mut ctx: on_gpiote::Context) {
+        // let delay = 50.millis();
         ctx.shared.gpiote.lock(|gpiote| {
-            if gpiote.channel0().is_event_triggered() {
-                rprintln!("interup from btn1");
-            }
+            rprintln!("test");
             gpiote.reset_events();
-            debounce::spawn_after(50.millis()).ok();
         });
     }
 
-    #[task(shared = [gpiote], local = [btn1])]
+    #[task(shared = [gpiote], local = [btn1], priority = 1)]
     fn debounce(mut ctx: debounce::Context) {
         let btn1_pressed = ctx.local.btn1.is_low().unwrap();
         rprintln!("button 1: {}", btn1_pressed);
