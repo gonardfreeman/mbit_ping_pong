@@ -10,4 +10,5 @@ cortex-m-rtic = "1.1.4"
 embedded-hal = "1.0.0"
 nrf52833-hal = { version = "0.18.0", features = ["rt"] }
 rtt-target = "0.5.0"
-systick-monotonic = "1.0.1"
+rtic-monotonic = "1.0.0"
+fugit = "0.3.7"

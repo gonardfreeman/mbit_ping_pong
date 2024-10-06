@@ -1,13 +1,18 @@
 #![no_std]
 #![no_main]
 
+mod monotonic_nrf52;
+
+use fugit::{self, ExtU32};
 use {core::panic::PanicInfo, nrf52833_hal as hal, rtt_target::rprintln};
 
-#[rtic::app(device = crate::hal::pac, peripherals = true, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
+#[rtic::app(device = crate::hal::pac, peripherals = true, dispatchers = [SWI0_EGU0])]
 mod app {
+    use super::*;
+
     use cortex_m::asm::nop;
     use embedded_hal::digital::{InputPin, OutputPin};
-    use fugit::Instant;
+    use monotonic_nrf52::MonoTimer;
     use nrf52833_hal::{
         self as hal,
         gpio::{
@@ -18,10 +23,9 @@ mod app {
     };
     use rtic::Monotonic;
     use rtt_target::{rprintln, rtt_init_print};
-    use systick_monotonic::*;
 
-    #[monotonic(binds = TIMER0, default = true)]
-    type Timer = Systick<1_000_000>;
+    #[monotonic(binds = TIMER1, default = true)]
+    type Tonic = MonoTimer<nrf52833_hal::pac::TIMER1>;
 
     #[shared]
     struct Shared {
@@ -42,7 +46,8 @@ mod app {
         let mut row1: P0_21<Output<PushPull>> = p0.p0_21.into_push_pull_output(Level::Low);
         let btn1 = p0.p0_14.into_pullup_input().degrade();
         let _ = row1.set_high();
-        let mono = Systick::new(ctx.core.SYST, 64_000_000);
+
+        let mono = MonoTimer::new(ctx.device.TIMER1);
 
         let gpiote = Gpiote::new(ctx.device.GPIOTE);
         gpiote
@@ -50,6 +55,7 @@ mod app {
             .input_pin(&btn1)
             .hi_to_lo()
             .enable_interrupt();
+        foo::spawn().ok();
         rprintln!("init finished");
         (
             Shared { gpiote },
@@ -58,22 +64,28 @@ mod app {
         )
     }
 
+    #[task]
+    fn foo(_: foo::Context) {
+        // rprintln!("foo");
+        foo::spawn_after(2000.millis()).ok();
+    }
+
     #[task(binds = GPIOTE, shared = [gpiote])]
     fn on_gpiote(mut ctx: on_gpiote::Context) {
-        // let delay = 50.millis();
         ctx.shared.gpiote.lock(|gpiote| {
-            rprintln!("test");
+            rprintln!("on_gpiote");
             gpiote.reset_events();
+            debounce::spawn_after(50.millis()).ok();
         });
     }
 
-    #[task(shared = [gpiote], local = [btn1], priority = 1)]
+    #[task(shared = [gpiote], local = [btn1])]
     fn debounce(mut ctx: debounce::Context) {
         let btn1_pressed = ctx.local.btn1.is_low().unwrap();
-        rprintln!("button 1: {}", btn1_pressed);
+        // rprintln!("button 1: {}", btn1_pressed);
         ctx.shared.gpiote.lock(|gpiote| {
             if btn1_pressed {
-                rprintln!("Button 1 was pressed!");
+                rprintln!("Button 1 was pressed with debounce!");
                 // Manually run "task out" operation (toggle) on channel 1 (toggles led1)
                 gpiote.channel0().out();
             }
