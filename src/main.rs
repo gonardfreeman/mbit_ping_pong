@@ -11,7 +11,7 @@ mod app {
     use super::*;
 
     use cortex_m::asm::nop;
-    use embedded_hal::digital::{InputPin, OutputPin};
+    use embedded_hal::digital::{InputPin, OutputPin, StatefulOutputPin};
     use monotonic_nrf52::MonoTimer;
     use nrf52833_hal::{
         self as hal,
@@ -30,11 +30,11 @@ mod app {
     #[shared]
     struct Shared {
         gpiote: Gpiote,
+        led1: P0_21<Output<PushPull>>,
     }
 
     #[local]
     struct Local {
-        row1: P0_21<Output<PushPull>>,
         btn1: Pin<Input<PullUp>>,
     }
 
@@ -46,7 +46,6 @@ mod app {
         let mut row1: P0_21<Output<PushPull>> = p0.p0_21.into_push_pull_output(Level::Low);
         let btn1 = p0.p0_14.into_pullup_input().degrade();
         let _ = row1.set_high();
-
         let mono = MonoTimer::new(ctx.device.TIMER1);
 
         let gpiote = Gpiote::new(ctx.device.GPIOTE);
@@ -58,8 +57,8 @@ mod app {
         foo::spawn().ok();
         rprintln!("init finished");
         (
-            Shared { gpiote },
-            Local { row1, btn1 },
+            Shared { gpiote, led1: row1 },
+            Local { btn1 },
             init::Monotonics(mono),
         )
     }
@@ -79,23 +78,23 @@ mod app {
         });
     }
 
-    #[task(shared = [gpiote], local = [btn1])]
+    #[task(shared = [gpiote, led1], local = [btn1])]
     fn debounce(mut ctx: debounce::Context) {
         let btn1_pressed = ctx.local.btn1.is_low().unwrap();
-        // rprintln!("button 1: {}", btn1_pressed);
-        ctx.shared.gpiote.lock(|gpiote| {
-            if btn1_pressed {
-                rprintln!("Button 1 was pressed with debounce!");
-                // Manually run "task out" operation (toggle) on channel 1 (toggles led1)
-                gpiote.channel0().out();
-            }
-        });
+        let led_is_light = ctx.shared.led1.lock(|led1| led1.is_set_low().unwrap());
+        if btn1_pressed {
+            ctx.shared.led1.lock(|led1| {
+                if led_is_light {
+                    let _ = led1.set_high();
+                } else {
+                    let _ = led1.set_low();
+                }
+            });
+        }
     }
 
-    #[idle(local = [row1])]
-    fn idle(ctx: idle::Context) -> ! {
-        let row1_pin = ctx.local.row1;
-        let _ = row1_pin.set_low();
+    #[idle()]
+    fn idle(_: idle::Context) -> ! {
         loop {
             rprintln!("idle...");
             for _ in 0..300_000 {
