@@ -1,4 +1,4 @@
-pub use fugit::{self, ExtU32};
+pub use fugit::{self};
 use nrf52833_hal::pac::{timer0, TIMER0, TIMER1, TIMER2};
 use rtic_monotonic::Monotonic;
 
